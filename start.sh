@@ -1,37 +1,41 @@
 #!/usr/bin/env bash
 
+# make sure models dir exists
 mkdir -p /app/backend/data/models
 
+# launch Ollama server in background
 /bin/ollama serve &
 
-# Wait until Ollama service is up and running
-until curl -s http://localhost:11434 > /dev/null; do 
-  echo 'Waiting for Ollama service to start...'; 
-  sleep 1; 
-done 
+# wait until Ollama is listening on 11434
+until (echo > /dev/tcp/localhost/11434) >/dev/null 2>&1; do
+  echo "Waiting for Ollama service to start..."
+  sleep 1
+done
 
-if ! [ -e "$DEFAULT_MODEL" ]; then
+# pull default model if needed
+if ! ollama list | grep -q "$DEFAULT_MODEL"; then
   echo "Pulling default model: $DEFAULT_MODEL"
-  ollama pull $DEFAULT_MODEL &
+  ollama pull "$DEFAULT_MODEL"
 fi
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-cd "$SCRIPT_DIR" || exit
+# change to script folder
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+cd "$SCRIPT_DIR" || exit 1
 
+# secret‑key setup
 KEY_FILE=.webui_secret_key
-
 PORT="${PORT:-8080}"
+
 if test "$WEBUI_SECRET_KEY $WEBUI_JWT_SECRET_KEY" = " "; then
-  echo No WEBUI_SECRET_KEY provided
-
+  echo "No WEBUI_SECRET_KEY provided"
   if ! [ -e "$KEY_FILE" ]; then
-    echo Generating WEBUI_SECRET_KEY
-    # Generate a random value to use as a WEBUI_SECRET_KEY in case the user didn't provide one.
-    echo $(head -c 12 /dev/random | base64) > $KEY_FILE
+    echo "Generating WEBUI_SECRET_KEY"
+    head -c 12 /dev/random | base64 > $KEY_FILE
   fi
-
-  echo Loading WEBUI_SECRET_KEY from $KEY_FILE
-  WEBUI_SECRET_KEY=`cat $KEY_FILE`
+  WEBUI_SECRET_KEY=$(cat $KEY_FILE)
+  echo "Loaded WEBUI_SECRET_KEY"
 fi
 
-WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" exec uvicorn main:app --host 0.0.0.0 --port 8080 --forwarded-allow-ips '*'
+# finally launch the FastAPI UI
+WEBUI_SECRET_KEY="$WEBUI_SECRET_KEY" \
+exec uvicorn main:app --host 0.0.0.0 --port "$PORT" --forwarded-allow-ips '*'
